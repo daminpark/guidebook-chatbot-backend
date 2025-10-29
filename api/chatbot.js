@@ -33,7 +33,7 @@ const ratelimit = new Ratelimit({
 module.exports = async (req, res) => {
     // Allow CORS for your GitHub Pages site
     res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', 'https://YOUR-GITHUB-USERNAME.github.io'); // IMPORTANT: Change this!
+    res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com'); // IMPORTANT: Change this!
     res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
 
@@ -73,3 +73,4 @@ module.exports = async (req, res) => {
         res.status(500).json({ error: 'Failed to get a response from the AI' });
     }
 };
+
