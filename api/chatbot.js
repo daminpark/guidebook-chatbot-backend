@@ -59,7 +59,7 @@ module.exports = async (req, res) => {
 
         // Initialize Gemini
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
         const fullPrompt = `Based on the following information about the guesthouse and general knowledge of London, answer the user's question. Guesthouse Info: ${guesthouseInfo}\n\nUser question: ${prompt}`;
 
@@ -73,4 +73,5 @@ module.exports = async (req, res) => {
         res.status(500).json({ error: 'Failed to get a response from the AI' });
     }
 };
+
 
