@@ -42,7 +42,7 @@ module.exports = async (req, res) => {
 
         // Initialize Google AI
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
         // Generate content as a stream
         const result = await model.generateContentStream(context + "\n\nUser question: " + prompt);
