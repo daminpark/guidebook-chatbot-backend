@@ -10,7 +10,7 @@ const redis = new Redis({
 
 const ratelimit = new Ratelimit({
   redis: redis,
-  limiter: Ratelimit.slidingWindow(5, "60 s"), // Allows 5 requests per minute per user
+  limiter: Ratelimit.slidingWindow(20, "60 s"), // Allows 5 requests per minute per user
 });
 
 // Main serverless function handler
