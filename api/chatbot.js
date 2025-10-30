@@ -43,7 +43,7 @@ module.exports = async (req, res) => {
 
         // Initialize the Google Generative AI model
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite-001" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
         // Create the final, detailed prompt for the AI
         const fullPrompt = `Based on the following information, answer the user's question. Information: ${context}\n\nUser question: ${prompt}`;
