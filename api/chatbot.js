@@ -10,53 +10,63 @@ const redis = new Redis({
 
 const ratelimit = new Ratelimit({
   redis: redis,
-  limiter: Ratelimit.slidingWindow(20, "60 s"), // Allows 5 requests per minute per user
+  limiter: Ratelimit.slidingWindow(20, "60 s"), // 20 requests per minute
 });
 
 // Main serverless function handler
 module.exports = async (req, res) => {
-    // Set CORS headers to allow requests only from your website
-    res.setHeader('Access-Control-Allow-Credentials', true);
+    // Set CORS headers
     res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com');
-    res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-    // Handle the browser's preflight request
     if (req.method === 'OPTIONS') {
-        res.status(200).end();
-        return;
+        return res.status(200).end();
+    }
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
-    // Enforce rate limiting based on the user's IP address
+    // Enforce rate limiting
     const ip = req.headers['x-forwarded-for'] || '127.0.0.1';
     const { success } = await ratelimit.limit(ip);
     if (!success) {
-        return res.status(429).json({ error: 'Too many requests' });
+        return res.status(429).json({ error: 'Too many requests. Please wait a moment.' });
     }
     
     try {
-        // Get the prompt and the context sent from your website
         const { prompt, context } = req.body;
         if (!prompt || !context) {
           return res.status(400).json({ error: 'Prompt and context are required' });
         }
 
-        // Initialize the Google Generative AI model
+        // Initialize Google AI
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-        // Create the final, detailed prompt for the AI
-        const fullPrompt = `Based on the following information, answer the user's question. Information: ${context}\n\nUser question: ${prompt}`;
+        // Generate content as a stream
+        const result = await model.generateContentStream(context + "\n\nUser question: " + prompt);
 
-        // Get the response from the AI
-        const result = await model.generateContent(fullPrompt);
-        const response = await result.response;
-        const text = response.text();
+        // Set headers for streaming response
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
-        // Send the AI's answer back to your website
-        res.status(200).json({ response: text });
+        // Pipe the stream from the AI to the client
+        for await (const chunk of result.stream) {
+            const chunkText = chunk.text();
+            res.write(chunkText);
+        }
+
+        // End the response stream
+        res.end();
+
     } catch (error) {
         console.error("Error in Vercel function:", error);
-        res.status(500).json({ error: 'Failed to get a response from the AI' });
+        // Note: Can't send a JSON error if headers are already sent for streaming.
+        // The client-side will handle this as a failed request.
+        if (!res.headersSent) {
+            res.status(500).json({ error: 'Failed to get a response from the AI' });
+        } else {
+            res.end(); // Gracefully end the stream on error
+        }
     }
 };
