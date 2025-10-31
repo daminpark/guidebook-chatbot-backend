@@ -1,7 +1,8 @@
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import ical from 'node-ical';
-import { utcToZonedTime, zonedTimeToUtc } from 'date-fns-tz'; // <-- Import new date functions
+// --- THE FIX: Import the entire library as a namespace ---
+import * as dateFnsTz from 'date-fns-tz';
 
 // --- Helper Functions (No changes here) ---
 function getPinFromPhoneNumber(description) {
@@ -56,37 +57,31 @@ export default async function handler(req, res) {
     }
 
     const events = await ical.async.fromURL(icalUrl);
-    let matchedEvent = null; // <-- Will store the matching event object
+    let matchedEvent = null;
 
     for (const key in events) {
       if (events.hasOwnProperty(key)) {
         const event = events[key];
         if (event.type !== 'VEVENT') continue;
-
         const primaryPin = getPinFromPhoneNumber(event.description);
         const fallbackPin = getFallbackPinFromName(event.summary);
-
         if (pinProvided === primaryPin || pinProvided === fallbackPin) {
-          matchedEvent = event; // <-- We found our event, store it
+          matchedEvent = event;
           console.log(`[validate-booking] SUCCESS: PIN match for event: ${event.summary}`);
           break;
         }
       }
     }
 
-    // --- 5. Time-Based Access Control (NEW LOGIC) ---
     if (matchedEvent) {
       const now = new Date();
-      
-      // The iCal dates are "floating" dates. We must treat them as London dates.
-      // `node-ical` correctly parses them into the system's timezone, so we convert them.
       const checkInDate = matchedEvent.start;
       const checkOutDate = matchedEvent.end;
       
-      // Define the key time boundaries in London time
-      const fullAccessStart = zonedTimeToUtc(new Date(checkInDate.setHours(11, 0, 0, 0)), LONDON_TIME_ZONE);
-      const fullAccessEnd = zonedTimeToUtc(new Date(checkOutDate.setHours(11, 0, 0, 0)), LONDON_TIME_ZONE);
-      const gracePeriodEnd = zonedTimeToUtc(new Date(checkOutDate.setHours(23, 0, 0, 0)), LONDON_TIME_ZONE);
+      // --- THE FIX: Call the functions from the imported namespace ---
+      const fullAccessStart = dateFnsTz.zonedTimeToUtc(new Date(new Date(checkInDate).setHours(11, 0, 0, 0)), LONDON_TIME_ZONE);
+      const fullAccessEnd = dateFnsTz.zonedTimeToUtc(new Date(new Date(checkOutDate).setHours(11, 0, 0, 0)), LONDON_TIME_ZONE);
+      const gracePeriodEnd = dateFnsTz.zonedTimeToUtc(new Date(new Date(checkOutDate).setHours(23, 0, 0, 0)), LONDON_TIME_ZONE);
       
       console.log(`[validate-booking] Current Time (UTC): ${now.toISOString()}`);
       console.log(`[validate-booking] Full Access Start (UTC): ${fullAccessStart.toISOString()}`);
@@ -94,28 +89,19 @@ export default async function handler(req, res) {
       console.log(`[validate-booking] Grace Period End (UTC): ${gracePeriodEnd.toISOString()}`);
 
       let accessLevel = 'denied';
-
-      // Determine the access level based on the current time
       if (now >= fullAccessStart && now < fullAccessEnd) {
         accessLevel = 'full';
       } else if (now < fullAccessStart || (now >= fullAccessEnd && now < gracePeriodEnd)) {
-        // This covers both pre-stay and the post-stay grace period
         accessLevel = 'partial';
       }
       
-      // If access is still denied, it means the grace period has expired.
       if (accessLevel === 'denied') {
         console.warn(`[validate-booking] Access denied for ${matchedEvent.summary}. The link has expired.`);
         return res.status(403).json({ error: 'Access Denied. This booking link has expired.' });
       }
 
       console.log(`[validate-booking] Access level determined: ${accessLevel}`);
-      
-      // Return the final, successful response
-      return res.status(200).json({
-        access: accessLevel,
-        guest: matchedEvent.summary, // Send some useful info to the frontend
-      });
+      return res.status(200).json({ access: accessLevel, guest: matchedEvent.summary });
 
     } else {
       console.warn(`[validate-booking] No matching event found for provided PIN.`);
