@@ -2,8 +2,8 @@
 // It uses server-side environment variables to keep your tokens safe.
 
 export default async function handler(req, res) {
-  // Allow requests from your guidebook's domain
-  res.setHeader('Access-Control-Allow-Origin', '*'); // Or be more specific: 'https://manual.195vbr.com'
+  // Allow requests from your guidebook's domain. This is important!
+  res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com'); // Replace with your actual front-end domain if different
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -51,11 +51,10 @@ export default async function handler(req, res) {
     // Set caching headers to prevent hitting your HA instance too often
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate');
     
-    // Only return the data we absolutely need
-    return res.status(200).json({
-      state: data.state,
-      entity_id: data.entity_id
-    });
+    // *** THIS IS THE FIX ***
+    // We now return the COMPLETE data object, including the 'attributes'
+    // that the weather card needs.
+    return res.status(200).json(data);
 
   } catch (error) {
     console.error(error);
