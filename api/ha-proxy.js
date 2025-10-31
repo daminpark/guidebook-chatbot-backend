@@ -1,16 +1,12 @@
-// This is the definitive and final version.
-// It is based on the actual successful curl response from the user's server.
-
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS, POST');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
+  // CORS is handled by vercel.json, so we just handle the OPTIONS preflight.
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  const { house, entity, type = 'state' } = req.query;
+  // --- TRV --- Determine Home Assistant instance from either GET query or POST body
+  const getParam = (param) => req.method === 'GET' ? req.query[param] : req.body[param];
+  const house = getParam('house');
 
   let hassUrl = '';
   let hassToken = '';
@@ -25,61 +21,97 @@ export default async function handler(req, res) {
       hassToken = process.env.HASS_195_TOKEN;
       break;
     default:
-      return res.status(400).json({ error: 'Invalid house specified' });
+      return res.status(400).json({ error: 'Invalid or missing house specified' });
   }
 
-  if (!hassUrl || !hassToken || !entity) {
-    return res.status(400).json({ error: 'Missing required parameters' });
+  if (!hassUrl || !hassToken) {
+    return res.status(500).json({ error: 'Server configuration error for Home Assistant connection.' });
   }
+
+  const headers = {
+    'Authorization': `Bearer ${hassToken}`,
+    'Content-Type': 'application/json',
+  };
 
   try {
-    const headers = {
-      'Authorization': `Bearer ${hassToken}`,
-      'Content-Type': 'application/json',
-    };
+    // --- Existing logic for GET requests (reading state) ---
+    if (req.method === 'GET') {
+      const { entity, type = 'state' } = req.query;
+      if (!entity) {
+        return res.status(400).json({ error: 'Missing entity parameter' });
+      }
 
-    let response;
-    let data;
-
-    if (type === 'hourly_forecast' || type === 'daily_forecast') {
-      const forecastType = type.split('_')[0];
-      const forecastUrl = `${hassUrl}/api/services/weather/get_forecasts?return_response=true`;
-      
-      response = await fetch(forecastUrl, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify({
-          entity_id: entity,
-          type: forecastType
-        }),
-      });
+      let response;
+      if (type === 'hourly_forecast' || type === 'daily_forecast') {
+        const forecastType = type.split('_')[0];
+        const forecastUrl = `${hassUrl}/api/services/weather/get_forecasts`;
+        response = await fetch(forecastUrl, {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify({ entity_id: entity, type: forecastType }),
+        });
+      } else {
+        response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
+      }
 
       if (!response.ok) {
         const errorBody = await response.text();
         throw new Error(`Home Assistant API responded with status ${response.status}: ${errorBody}`);
       }
-
-      const responseJson = await response.json();
       
-      // THE FIX IS HERE: We use the correct path to the forecast data.
-      if (responseJson && responseJson.service_response && responseJson.service_response[entity]) {
-        data = responseJson.service_response[entity].forecast;
-      } else {
-        // Fallback in case the response structure is unexpectedly different.
-        data = [];
-      }
-
-    } else {
-      // The simple GET request for the state remains the same.
-      response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
-      data = await response.json();
+      const data = await response.json();
+      res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate');
+      return res.status(200).json(data);
     }
     
-    res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate');
-    return res.status(200).json(data);
+    // --- TRV --- New logic for POST requests (sending commands) ---
+    if (req.method === 'POST') {
+      const { entity, type, temperature } = req.body;
+      if (!entity || !type) {
+        return res.status(400).json({ error: 'Missing entity or type in POST body' });
+      }
+
+      // We only allow one type of POST command for now: setting TRV temperature
+      if (type !== 'set_temperature') {
+        return res.status(400).json({ error: 'Unsupported POST type' });
+      }
+
+      // --- Security Validations ---
+      if (!entity.startsWith('climate.')) {
+        return res.status(403).json({ error: 'Forbidden: Can only control climate entities.' });
+      }
+      const tempNum = parseFloat(temperature);
+      if (isNaN(tempNum) || tempNum < 7 || tempNum > 25) {
+        return res.status(400).json({ error: 'Invalid temperature. Must be between 7 and 25.' });
+      }
+
+      // This is the Home Assistant service call for setting temperature
+      const serviceUrl = `${hassUrl}/api/services/climate/set_temperature`;
+      const serviceBody = {
+        entity_id: entity,
+        temperature: tempNum,
+      };
+
+      const response = await fetch(serviceUrl, {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(serviceBody),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Home Assistant service call failed with status ${response.status}: ${errorBody}`);
+      }
+      
+      const data = await response.json();
+      return res.status(200).json({ success: true, state: data });
+    }
+
+    // If not GET or POST
+    return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
 
   } catch (error) {
-    console.error(`Error in ha-proxy for entity ${entity} with type ${type}:`, error);
-    return res.status(500).json({ error: 'Failed to fetch data from Home Assistant' });
+    console.error(`Error in ha-proxy for house ${house}:`, error);
+    return res.status(500).json({ error: 'Failed to communicate with Home Assistant' });
   }
 }
