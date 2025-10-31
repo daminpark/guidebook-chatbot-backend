@@ -1,4 +1,4 @@
-// The permissions object is now defined directly inside this file.
+// The permissions object is defined directly inside this file.
 const permissions = {
   "31": { "climate": ["climate.3_1_trv"] },
   "32": { "climate": ["climate.3_2_trv"] },
@@ -36,7 +36,9 @@ export default async function handler(req, res) {
   const headers = { 'Authorization': `Bearer ${hassToken}`, 'Content-Type': 'application/json' };
 
   try {
+    // GET requests (reading state) are public and do not require time-based auth
     if (req.method === 'GET') {
+      // (GET logic remains unchanged)
       const { entity, type = 'state' } = req.query;
       if (!entity) return res.status(400).json({ error: 'Missing entity' });
       let data;
@@ -46,9 +48,7 @@ export default async function handler(req, res) {
         const response = await fetch(forecastUrl, { method: 'POST', headers, body: JSON.stringify({ entity_id: entity, type: forecastType }) });
         if (!response.ok) throw new Error(`HA API responded with status ${response.status}`);
         const responseJson = await response.json();
-        if (responseJson?.service_response?.[entity]) {
-            data = responseJson.service_response[entity].forecast;
-        } else { data = []; }
+        if (responseJson?.service_response?.[entity]) { data = responseJson.service_response[entity].forecast; } else { data = []; }
       } else {
         const response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
         if (!response.ok) throw new Error(`HA API responded with status ${response.status}`);
@@ -60,11 +60,24 @@ export default async function handler(req, res) {
     
     if (req.method === 'POST') {
       const { entity, type, temperature, opaqueBookingKey } = req.body;
-
       if (!opaqueBookingKey || !opaqueBookingKey.includes('-')) {
         return res.status(401).json({ error: 'Unauthorized: Missing or malformed booking key.' });
       }
-      
+
+      // --- NEW TIME-BASED SECURITY CHECK ---
+      // This function internally calls our other API endpoint to perform a full validation.
+      // We must use the full, absolute URL.
+      const validationUrl = `${process.env.VERCEL_URL.startsWith('localhost') ? 'http://' : 'https://'}${process.env.VERCEL_URL}/api/validate-booking?booking=${opaqueBookingKey}`;
+      const validationResponse = await fetch(validationUrl);
+      const validationData = await validationResponse.json();
+
+      // Only allow commands if the user has FULL access (i.e., they are currently checked in).
+      if (!validationResponse.ok || validationData.access !== 'full') {
+        console.warn(`[SECURITY] Command blocked for booking key ${opaqueBookingKey}. Access level: ${validationData.access || 'denied'}`);
+        return res.status(403).json({ error: 'Forbidden: Your booking is not currently active.' });
+      }
+      // --- END OF NEW CHECK ---
+
       const [bookingId] = opaqueBookingKey.split('-');
       const userPermissions = permissions[bookingId];
       if (!userPermissions) {
@@ -72,13 +85,8 @@ export default async function handler(req, res) {
       }
 
       let permissionCategory = null;
-      if (type === 'set_temperature') {
-        permissionCategory = 'climate';
-      }
-
-      if (!permissionCategory) {
-        return res.status(400).json({ error: 'Unsupported command type.' });
-      }
+      if (type === 'set_temperature') { permissionCategory = 'climate'; }
+      if (!permissionCategory) { return res.status(400).json({ error: 'Unsupported command type.' }); }
 
       const allowedEntities = userPermissions[permissionCategory];
       if (!allowedEntities || !allowedEntities.includes(entity)) {
