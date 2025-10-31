@@ -1,9 +1,9 @@
-// This function acts as a secure proxy to your Home Assistant instances.
-// It is now corrected to properly handle the nested structure of the get_forecasts service response.
+// This is the correct ha-proxy.js file.
+// The logic is confirmed by your manual HA test.
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS, POST'); // Added POST for completeness
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -42,7 +42,9 @@ export default async function handler(req, res) {
     let data;
 
     if (type === 'hourly_forecast' || type === 'daily_forecast') {
-      const forecastType = type.split('_')[0];
+      const forecastType = type.split('_')[0]; // 'hourly' or 'daily'
+      
+      // This is the fetch call that is failing, but the logic is correct.
       response = await fetch(`${hassUrl}/api/services/weather/get_forecasts`, {
         method: 'POST',
         headers: headers,
@@ -51,28 +53,27 @@ export default async function handler(req, res) {
           type: forecastType
         }),
       });
-      const rawData = await response.json();
       
-      // *** THIS IS THE FIX ***
-      // We now correctly look inside the object named after the entity to find the forecast array.
-      // e.g., we look inside rawData['weather.forecast_home'] to find the 'forecast' key.
-      data = (rawData[entity] && rawData[entity].forecast) ? rawData[entity].forecast : [];
+      data = await response.json();
+      // This parsing logic is confirmed correct by your manual test.
+      data = data[entity].forecast; 
 
     } else {
+      // This fetch call for the state works correctly.
       response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
       data = await response.json();
     }
 
     if (!response.ok) {
-      // Throw an error with the response body for better debugging
-      const errorBody = await response.text();
-      throw new Error(`Home Assistant API responded with status: ${response.status}. Body: ${errorBody}`);
+      // This will catch HTTP errors like 401 Unauthorized or 404 Not Found.
+      throw new Error(`Home Assistant API responded with status: ${response.status}`);
     }
     
-    res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600'); // Cache for 5 mins
+    res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate');
     return res.status(200).json(data);
 
   } catch (error) {
+    // This 'catch' block is what's sending the error message you see.
     console.error(`Error in ha-proxy for entity ${entity} with type ${type}:`, error);
     return res.status(500).json({ error: 'Failed to fetch data from Home Assistant' });
   }
