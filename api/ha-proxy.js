@@ -1,5 +1,5 @@
-// This is the definitive solution.
-// It handles the streaming JSON response from Home Assistant.
+// This is the definitive and final version.
+// It is based on the actual successful curl response from the user's server.
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com');
@@ -59,19 +59,15 @@ export default async function handler(req, res) {
         throw new Error(`Home Assistant API responded with status ${response.status}: ${errorBody}`);
       }
 
-      // --- NEW LOGIC TO HANDLE STREAMING JSON ---
-      const rawResponseText = await response.text();
-      // The response may contain multiple JSON objects separated by newlines.
-      // We split by newline, filter out any empty lines, and take the last one,
-      // which contains the final forecast data.
-      const jsonLines = rawResponseText.trim().split('\n');
-      const lastLine = jsonLines[jsonLines.length - 1];
+      const responseJson = await response.json();
       
-      data = JSON.parse(lastLine);
-      // --- END OF NEW LOGIC ---
-
-      // Now, we can safely parse the final data object.
-      data = data[entity].forecast; 
+      // THE FIX IS HERE: We use the correct path to the forecast data.
+      if (responseJson && responseJson.service_response && responseJson.service_response[entity]) {
+        data = responseJson.service_response[entity].forecast;
+      } else {
+        // Fallback in case the response structure is unexpectedly different.
+        data = [];
+      }
 
     } else {
       // The simple GET request for the state remains the same.
