@@ -35,13 +35,16 @@ export default async function handler(req, res) {
 
       if (type === 'hourly_forecast' || type === 'daily_forecast') {
         const forecastType = type.split('_')[0];
-        const forecastUrl = `${hassUrl}/api/services/weather/get_forecasts`;
+        
+        // --- THIS IS THE CRITICAL FIX ---
+        // 'return_response=true' is a query parameter in the URL.
+        const forecastUrl = `${hassUrl}/api/services/weather/get_forecasts?return_response=true`;
         
         const response = await fetch(forecastUrl, {
           method: 'POST',
           headers,
-          // --- NEW: Add return_response=true to get the correct data structure ---
-          body: JSON.stringify({ entity_id: entity, type: forecastType, return_response: true }),
+          // The body does NOT contain 'return_response'.
+          body: JSON.stringify({ entity_id: entity, type: forecastType }),
         });
         
         if (!response.ok) {
@@ -51,12 +54,10 @@ export default async function handler(req, res) {
         
         const responseJson = await response.json();
 
-        // --- THIS IS THE DEFINITIVE FIX ---
-        // We navigate the object path based on the real data structure.
+        // And this is the correct parsing logic based on your data dump.
         if (responseJson && responseJson.service_response && responseJson.service_response[entity]) {
             data = responseJson.service_response[entity].forecast;
         } else {
-            // This is a robust fallback in case the structure is ever different.
             data = [];
         }
 
