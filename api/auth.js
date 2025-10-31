@@ -8,8 +8,10 @@ module.exports = async (req, res) => {
     try {
         // --- MODIFICATION START ---
         const { bookingCode } = req.body; // Expecting a single combined code, e.g., "31-6556"
+        console.log('Received request with booking code:', bookingCode);
 
         if (!bookingCode || !bookingCode.includes('-')) {
+            console.log('Error: Malformed booking code.');
             return res.status(400).json({ error: 'A valid booking code is required.' });
         }
 
@@ -21,7 +23,10 @@ module.exports = async (req, res) => {
         }
 
         const icalUrl = ICAL_URLS[bookingKey];
+        console.log('Attempting to fetch iCal from URL for key:', bookingKey);
+
         if (!icalUrl) {
+            console.log('Error: No iCal URL found for this booking key.'); // <-- ADD THIS
             return res.status(404).json({ error: 'Invalid booking key.' });
         }
 
