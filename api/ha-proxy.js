@@ -1,4 +1,24 @@
-import { permissions } from './_permissions.js';
+// The permissions object is now defined directly inside this file.
+const permissions = {
+  "31": { "climate": ["climate.3_1_trv"] },
+  "32": { "climate": ["climate.3_2_trv"] },
+  "33": { "climate": ["climate.3_c_trv", "climate.3_3_trv"] },
+  "34": { "climate": ["climate.3_4_trv"] },
+  "35": { "climate": ["climate.3_5_trv"] },
+  "36": { "climate": ["climate.3_6_trv"] },
+  "3a": { "climate": ["climate.3_1_trv", "climate.3_2_trv"] },
+  "3b": { "climate": ["climate.3_4_trv", "climate.3_5_trv", "climate.3_6_trv"] },
+  "51": { "climate": ["climate.5_1_trv"] },
+  "52": { "climate": ["climate.5_2_trv"] },
+  "53": { "climate": ["climate.5_c_trv", "climate.5_3_trv"] },
+  "54": { "climate": ["climate.5_4_trv"] },
+  "55": { "climate": ["climate.5_5_trv"] },
+  "56": { "climate": ["climate.5_6_trv"] },
+  "5a": { "climate": ["climate.5_1_trv", "climate.5_2_trv"] },
+  "5b": { "climate": ["climate.5_4_trv", "climate.5_5_trv", "climate.5_6_trv"] },
+  "193vbr": { "climate": ["climate.3_1_trv", "climate.3_2_trv", "climate.3_3_trv", "climate.3_c_trv", "climate.3_4_trv", "climate.3_5_trv", "climate.3_6_trv"] },
+  "195vbr": { "climate": ["climate.5_1_trv", "climate.5_2_trv", "climate.5_3_trv", "climate.5_c_trv", "climate.5_4_trv", "climate.5_5_trv", "climate.5_6_trv"] }
+};
 
 export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
@@ -51,12 +71,10 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'Forbidden: Unknown booking ID.' });
       }
 
-      // --- THIS IS THE CORRECTED LOGIC ---
       let permissionCategory = null;
       if (type === 'set_temperature') {
         permissionCategory = 'climate';
       }
-      // Future service calls like 'turn_on' for a light would be added here.
 
       if (!permissionCategory) {
         return res.status(400).json({ error: 'Unsupported command type.' });
@@ -68,7 +86,6 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'Forbidden: You do not have permission to control this device.' });
       }
       
-      // If we pass all checks, proceed
       if (type === 'set_temperature') {
         const tempNum = parseFloat(temperature);
         if (isNaN(tempNum) || tempNum < 7 || tempNum > 25) return res.status(400).json({ error: 'Invalid temperature' });
@@ -89,7 +106,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error(`Error in ha-proxy for house ${house}:`, error.message);
-    // Return a JSON error instead of raw text/html
     return res.status(500).json({ error: 'A server error occurred while communicating with Home Assistant.' });
   }
 }
