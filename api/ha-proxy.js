@@ -1,10 +1,9 @@
 export default async function handler(req, res) {
-  // CORS is handled by vercel.json, so we just handle the OPTIONS preflight.
+  // CORS is handled by vercel.json. We only need to handle the OPTIONS preflight.
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  // --- TRV --- Determine Home Assistant instance from either GET query or POST body
   const getParam = (param) => req.method === 'GET' ? req.query[param] : req.body[param];
   const house = getParam('house');
 
@@ -34,16 +33,14 @@ export default async function handler(req, res) {
   };
 
   try {
-    // --- Existing logic for GET requests (reading state) ---
     if (req.method === 'GET') {
       const { entity, type = 'state' } = req.query;
-      if (!entity) {
-        return res.status(400).json({ error: 'Missing entity parameter' });
-      }
+      if (!entity) { return res.status(400).json({ error: 'Missing entity parameter' }); }
 
       let response;
       if (type === 'hourly_forecast' || type === 'daily_forecast') {
         const forecastType = type.split('_')[0];
+        // THE FIX from before: Calling the get_forecasts service
         const forecastUrl = `${hassUrl}/api/services/weather/get_forecasts`;
         response = await fetch(forecastUrl, {
           method: 'POST',
@@ -64,39 +61,18 @@ export default async function handler(req, res) {
       return res.status(200).json(data);
     }
     
-    // --- TRV --- New logic for POST requests (sending commands) ---
     if (req.method === 'POST') {
       const { entity, type, temperature } = req.body;
-      if (!entity || !type) {
-        return res.status(400).json({ error: 'Missing entity or type in POST body' });
-      }
-
-      // We only allow one type of POST command for now: setting TRV temperature
-      if (type !== 'set_temperature') {
-        return res.status(400).json({ error: 'Unsupported POST type' });
-      }
-
-      // --- Security Validations ---
-      if (!entity.startsWith('climate.')) {
-        return res.status(403).json({ error: 'Forbidden: Can only control climate entities.' });
-      }
+      if (!entity || !type) { return res.status(400).json({ error: 'Missing entity or type in POST body' }); }
+      if (type !== 'set_temperature') { return res.status(400).json({ error: 'Unsupported POST type' }); }
+      if (!entity.startsWith('climate.')) { return res.status(403).json({ error: 'Forbidden: Can only control climate entities.' }); }
       const tempNum = parseFloat(temperature);
-      if (isNaN(tempNum) || tempNum < 7 || tempNum > 25) {
-        return res.status(400).json({ error: 'Invalid temperature. Must be between 7 and 25.' });
-      }
+      if (isNaN(tempNum) || tempNum < 7 || tempNum > 25) { return res.status(400).json({ error: 'Invalid temperature. Must be between 7 and 25.' }); }
 
-      // This is the Home Assistant service call for setting temperature
       const serviceUrl = `${hassUrl}/api/services/climate/set_temperature`;
-      const serviceBody = {
-        entity_id: entity,
-        temperature: tempNum,
-      };
+      const serviceBody = { entity_id: entity, temperature: tempNum };
 
-      const response = await fetch(serviceUrl, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify(serviceBody),
-      });
+      const response = await fetch(serviceUrl, { method: 'POST', headers: headers, body: JSON.stringify(serviceBody) });
 
       if (!response.ok) {
         const errorBody = await response.text();
@@ -107,7 +83,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, state: data });
     }
 
-    // If not GET or POST
     return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
 
   } catch (error) {
