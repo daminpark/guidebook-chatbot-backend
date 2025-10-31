@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // CORS is handled by vercel.json.
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
@@ -32,17 +31,17 @@ export default async function handler(req, res) {
       const { entity, type = 'state' } = req.query;
       if (!entity) return res.status(400).json({ error: 'Missing entity parameter' });
 
-      let response;
       let data;
 
       if (type === 'hourly_forecast' || type === 'daily_forecast') {
         const forecastType = type.split('_')[0];
         const forecastUrl = `${hassUrl}/api/services/weather/get_forecasts`;
         
-        response = await fetch(forecastUrl, {
+        const response = await fetch(forecastUrl, {
           method: 'POST',
           headers,
-          body: JSON.stringify({ entity_id: entity, type: forecastType }),
+          // --- NEW: Add return_response=true to get the correct data structure ---
+          body: JSON.stringify({ entity_id: entity, type: forecastType, return_response: true }),
         });
         
         if (!response.ok) {
@@ -50,20 +49,19 @@ export default async function handler(req, res) {
           throw new Error(`HA API responded with status ${response.status}: ${errorBody}`);
         }
         
-        // --- THIS IS THE CRITICAL FIX YOU REMEMBERED ---
-        // We parse the complex response to find the actual forecast array.
         const responseJson = await response.json();
-        // The forecast data is nested deep inside the response object.
-        if (responseJson && responseJson.length > 0 && responseJson[0][entity]) {
-            data = responseJson[0][entity].forecast;
+
+        // --- THIS IS THE DEFINITIVE FIX ---
+        // We navigate the object path based on the real data structure.
+        if (responseJson && responseJson.service_response && responseJson.service_response[entity]) {
+            data = responseJson.service_response[entity].forecast;
         } else {
-            // Fallback for unexpected structure
+            // This is a robust fallback in case the structure is ever different.
             data = [];
         }
 
       } else {
-        // Simple state requests are unchanged
-        response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
+        const response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
         if (!response.ok) {
           const errorBody = await response.text();
           throw new Error(`HA API responded with status ${response.status}: ${errorBody}`);
@@ -76,13 +74,12 @@ export default async function handler(req, res) {
     }
     
     if (req.method === 'POST') {
-        // (POST logic for TRVs remains unchanged)
         const { entity, type, temperature } = req.body;
-        if (!entity || !type) { return res.status(400).json({ error: 'Missing entity or type in POST body' }); }
+        if (!entity || !type) { return res.status(400).json({ error: 'Missing entity or type' }); }
         if (type !== 'set_temperature') { return res.status(400).json({ error: 'Unsupported POST type' }); }
-        if (!entity.startsWith('climate.')) { return res.status(403).json({ error: 'Forbidden: Can only control climate entities.' }); }
+        if (!entity.startsWith('climate.')) { return res.status(403).json({ error: 'Forbidden' }); }
         const tempNum = parseFloat(temperature);
-        if (isNaN(tempNum) || tempNum < 7 || tempNum > 25) { return res.status(400).json({ error: 'Invalid temperature. Must be between 7 and 25.' }); }
+        if (isNaN(tempNum) || tempNum < 7 || tempNum > 25) { return res.status(400).json({ error: 'Invalid temperature' }); }
 
         const serviceUrl = `${hassUrl}/api/services/climate/set_temperature`;
         const serviceBody = { entity_id: entity, temperature: tempNum };
@@ -90,7 +87,7 @@ export default async function handler(req, res) {
         const response = await fetch(serviceUrl, { method: 'POST', headers, body: JSON.stringify(serviceBody) });
         if (!response.ok) {
             const errorBody = await response.text();
-            throw new Error(`HA service call failed with status ${response.status}: ${errorBody}`);
+            throw new Error(`HA service call failed: ${errorBody}`);
         }
         const responseData = await response.json();
         return res.status(200).json({ success: true, state: responseData });
