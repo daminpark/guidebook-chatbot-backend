@@ -2,15 +2,29 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import ical from 'node-ical';
 
-// (Helper functions are unchanged)
+// --- Helper Functions for PIN Generation ---
+
+/**
+ * Extracts the last 8 digits from a phone number string using a specific, non-greedy regex.
+ * @param {string} description - The full DESCRIPTION field from the iCal event.
+ * @returns {string|null} The 8-digit PIN or null if not found.
+ */
 function getPinFromPhoneNumber(description) {
   if (!description) return null;
   const phoneMatch = description.match(/Phone:\s*([+\d\s()-]+)/);
   if (!phoneMatch || !phoneMatch[1]) return null;
+  
   const numericPhone = phoneMatch[1].replace(/\D/g, '');
-  if (numericPhone.length < 4) return null;
-  return numericPhone.slice(-4);
+  if (numericPhone.length < 8) return null; // Check for at least 8 digits
+  
+  return numericPhone.slice(-8); // Take the last 8
 }
+
+/**
+ * Derives a fallback PIN from the guest's name.
+ * @param {string} summary - The SUMMARY field from the iCal event.
+ * @returns {string|null} The fallback PIN or null if no name is present.
+ */
 function getFallbackPinFromName(summary) {
     if (!summary) return null;
     const cleanedName = summary.replace(/(Airbnb|Vrbo)\s*\(.*?\)\s*-\s*/i, '').trim();
@@ -18,29 +32,36 @@ function getFallbackPinFromName(summary) {
     return cleanedName.replace(/\s+/g, '').toLowerCase().slice(0, 6);
 }
 
+// --- Main Handler ---
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
 });
+
 const ratelimit = new Ratelimit({
   redis: redis,
-  limiter: Ratelimit.slidingWindow(5, "60 s"),
+  limiter: Ratelimit.slidingWindow(60, "60 s"), // Generous limit for whole-home bookings
 });
 
-export default async function handler(req, res) {
-  // --- ALL CORS HEADERS HAVE BEEN REMOVED ---
-  // Vercel.json now handles this for the entire project.
+const LONDON_TIME_ZONE = 'Europe/London';
 
+export default async function handler(req, res) {
+  // CORS is handled by vercel.json
   if (req.method === 'OPTIONS') {
-    // Even with vercel.json, it's good practice to handle OPTIONS pre-emptively.
     return res.status(200).end();
   }
-
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  // (The rest of the logic is exactly the same)
+  // --- Rate Limiting is now ACTIVE ---
+  const ip = req.headers['x-forwarded-for'] || '127.0.0.1';
+  const { success } = await ratelimit.limit(ip);
+  if (!success) {
+    console.warn(`Rate limit exceeded for IP: ${ip}`);
+    return res.status(429).json({ error: 'Too many requests. Please wait a moment.' });
+  }
+
   try {
     const { booking: opaqueBookingKey } = req.query;
     if (!opaqueBookingKey || !opaqueBookingKey.includes('-')) {
@@ -50,6 +71,7 @@ export default async function handler(req, res) {
     if (!bookingId || !pinProvided) {
       return res.status(400).json({ error: 'Malformed booking key.' });
     }
+
     const icalUrlEnvVarKey = `ICAL_URL_${bookingId}`;
     const icalUrl = process.env[icalUrlEnvVarKey];
     if (!icalUrl) {
@@ -92,6 +114,7 @@ export default async function handler(req, res) {
       }
 
       return res.status(200).json({ access: accessLevel, guest: matchedEvent.summary });
+
     } else {
       return res.status(403).json({ error: 'Access Denied. The provided PIN is incorrect.' });
     }

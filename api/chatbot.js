@@ -9,7 +9,7 @@ const redis = new Redis({
 
 const ratelimit = new Ratelimit({
   redis: redis,
-  limiter: Ratelimit.slidingWindow(20, "60 s"),
+  limiter: Ratelimit.slidingWindow(60, "60 s"), // Generous limit for whole-home bookings
 });
 
 module.exports = async (req, res) => {
@@ -34,7 +34,7 @@ module.exports = async (req, res) => {
         }
 
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
         const chat = model.startChat({
             history: [

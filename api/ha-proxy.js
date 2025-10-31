@@ -1,4 +1,4 @@
-// The permissions object is defined directly inside this file.
+// This file is self-contained and fully secure.
 const permissions = {
   "31": { "climate": ["climate.3_1_trv"] },
   "32": { "climate": ["climate.3_2_trv"] },
@@ -25,6 +25,20 @@ export default async function handler(req, res) {
 
   const getParam = (param) => req.method === 'GET' ? req.query[param] : req.body[param];
   const house = getParam('house');
+  const opaqueBookingKey = req.method === 'GET' ? req.query.opaqueBookingKey : req.body.opaqueBookingKey;
+
+  if (!opaqueBookingKey || !opaqueBookingKey.includes('-')) {
+    return res.status(401).json({ error: 'Unauthorized: Missing or malformed booking key.' });
+  }
+
+  const validationUrl = `${process.env.VERCEL_URL.startsWith('localhost') ? 'http://' : 'https://'}${process.env.VERCEL_URL}/api/validate-booking?booking=${opaqueBookingKey}`;
+  const validationResponse = await fetch(validationUrl);
+  const validationData = await validationResponse.json();
+
+  if (!validationResponse.ok || !validationData.access || validationData.access === 'denied') {
+      console.warn(`[SECURITY] ha-proxy access blocked for key ${opaqueBookingKey}. Access level: denied`);
+      return res.status(403).json({ error: 'Forbidden: Your booking is not valid or has expired.' });
+  }
 
   let hassUrl, hassToken;
   switch (house) {
@@ -36,9 +50,7 @@ export default async function handler(req, res) {
   const headers = { 'Authorization': `Bearer ${hassToken}`, 'Content-Type': 'application/json' };
 
   try {
-    // GET requests (reading state) are public and do not require time-based auth
     if (req.method === 'GET') {
-      // (GET logic remains unchanged)
       const { entity, type = 'state' } = req.query;
       if (!entity) return res.status(400).json({ error: 'Missing entity' });
       let data;
@@ -59,34 +71,19 @@ export default async function handler(req, res) {
     }
     
     if (req.method === 'POST') {
-      const { entity, type, temperature, opaqueBookingKey } = req.body;
-      if (!opaqueBookingKey || !opaqueBookingKey.includes('-')) {
-        return res.status(401).json({ error: 'Unauthorized: Missing or malformed booking key.' });
+      if (validationData.access !== 'full') {
+        console.warn(`[SECURITY] POST command blocked for key ${opaqueBookingKey}. Access level: ${validationData.access}`);
+        return res.status(403).json({ error: 'Forbidden: Your booking is not currently active for sending commands.' });
       }
 
-      // --- NEW TIME-BASED SECURITY CHECK ---
-      // This function internally calls our other API endpoint to perform a full validation.
-      // We must use the full, absolute URL.
-      const validationUrl = `${process.env.VERCEL_URL.startsWith('localhost') ? 'http://' : 'https://'}${process.env.VERCEL_URL}/api/validate-booking?booking=${opaqueBookingKey}`;
-      const validationResponse = await fetch(validationUrl);
-      const validationData = await validationResponse.json();
-
-      // Only allow commands if the user has FULL access (i.e., they are currently checked in).
-      if (!validationResponse.ok || validationData.access !== 'full') {
-        console.warn(`[SECURITY] Command blocked for booking key ${opaqueBookingKey}. Access level: ${validationData.access || 'denied'}`);
-        return res.status(403).json({ error: 'Forbidden: Your booking is not currently active.' });
-      }
-      // --- END OF NEW CHECK ---
-
+      const { entity, type, temperature } = req.body;
       const [bookingId] = opaqueBookingKey.split('-');
       const userPermissions = permissions[bookingId];
-      if (!userPermissions) {
-        return res.status(403).json({ error: 'Forbidden: Unknown booking ID.' });
-      }
+      if (!userPermissions) return res.status(403).json({ error: 'Forbidden: Unknown booking ID.' });
 
       let permissionCategory = null;
       if (type === 'set_temperature') { permissionCategory = 'climate'; }
-      if (!permissionCategory) { return res.status(400).json({ error: 'Unsupported command type.' }); }
+      if (!permissionCategory) return res.status(400).json({ error: 'Unsupported command type.' });
 
       const allowedEntities = userPermissions[permissionCategory];
       if (!allowedEntities || !allowedEntities.includes(entity)) {
