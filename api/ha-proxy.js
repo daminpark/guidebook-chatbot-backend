@@ -1,9 +1,10 @@
-// This is the final version. It corrects the 400 Bad Request error.
+// This is the definitive solution.
+// It uses the single-call method with the required '?return_response=true' parameter.
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS, POST');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -37,49 +38,42 @@ export default async function handler(req, res) {
       'Content-Type': 'application/json',
     };
 
-    let responseData;
+    let response;
+    let data;
 
     if (type === 'hourly_forecast' || type === 'daily_forecast') {
+      const forecastType = type.split('_')[0]; // 'hourly' or 'daily'
       
-      // STEP 1: TRIGGER the forecast generation.
-      // THE FIX IS HERE: We have removed the 'type' parameter from the body.
-      const triggerResponse = await fetch(`${hassUrl}/api/services/weather/get_forecasts`, {
+      // THE FIX IS HERE: We add '?return_response=true' to the URL.
+      const forecastUrl = `${hassUrl}/api/services/weather/get_forecasts?return_response=true`;
+      
+      response = await fetch(forecastUrl, {
         method: 'POST',
         headers: headers,
         body: JSON.stringify({
-          entity_id: entity
+          entity_id: entity,
+          type: forecastType
         }),
       });
-
-      if (!triggerResponse.ok) {
-        // We now provide a more detailed error message for debugging.
-        const errorBody = await triggerResponse.text();
-        throw new Error(`HA service call failed with status ${triggerResponse.status}: ${errorBody}`);
-      }
-
-      // STEP 2: FETCH the entity state which now contains the forecast.
-      const fetchStateResponse = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
       
-      if (!fetchStateResponse.ok) {
-        throw new Error(`Failed to fetch updated state with status: ${fetchStateResponse.status}`);
-      }
+      data = await response.json();
+      
+      // And we use the original, correct parsing logic.
+      data = data[entity].forecast; 
 
-      const stateData = await fetchStateResponse.json();
-
-      // STEP 3: EXTRACT the forecast data.
-      if (stateData && stateData.attributes && stateData.attributes.forecast) {
-        responseData = stateData.attributes.forecast;
-      } else {
-        responseData = [];
-      }
     } else {
-      // For simple 'state' requests, just fetch the state directly.
-      const response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
-      responseData = await response.json();
+      // The simple GET request for the state remains the same.
+      response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
+      data = await response.json();
+    }
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Home Assistant API responded with status ${response.status}: ${errorBody}`);
     }
     
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate');
-    return res.status(200).json(responseData);
+    return res.status(200).json(data);
 
   } catch (error) {
     console.error(`Error in ha-proxy for entity ${entity} with type ${type}:`, error);
