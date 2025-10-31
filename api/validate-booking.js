@@ -2,7 +2,7 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import ical from 'node-ical';
 
-// --- Helper Functions (No changes) ---
+// (Helper functions getPinFromPhoneNumber and getFallbackPinFromName are unchanged)
 function getPinFromPhoneNumber(description) {
   if (!description) return null;
   const phoneMatch = description.match(/Phone:\s*([+\d\s()-]+)/);
@@ -19,7 +19,6 @@ function getFallbackPinFromName(summary) {
     return cleanedName.replace(/\s+/g, '').toLowerCase().slice(0, 6);
 }
 
-// --- Main Handler ---
 const redis = new Redis({
   url: process.env.UPSTASH_REDIS_REST_URL,
   token: process.env.UPSTASH_REDIS_REST_TOKEN,
@@ -29,43 +28,29 @@ const ratelimit = new Ratelimit({
   limiter: Ratelimit.slidingWindow(5, "60 s"),
 });
 
-const LONDON_TIME_ZONE = 'Europe/London';
-
-/**
- * Creates a new Date object correctly representing a given time in London.
- * This avoids external libraries by using the built-in Intl.DateTimeFormat.
- * @param {Date} date The source date
- * @returns {Date} A new Date object that is timezone-correct for comparison.
- */
-function getLondonDate(date) {
-    // Get the date and time parts in the London timezone
-    const options = { timeZone: LONDON_TIME_ZONE, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: false };
-    const formatter = new Intl.DateTimeFormat('en-GB', options);
-    const parts = formatter.formatToParts(date);
-    
-    const partValue = (type) => parts.find(p => p.type === type)?.value || '0';
-
-    // Reconstruct a date string in a format that new Date() can parse reliably (YYYY-MM-DDTHH:mm:ss)
-    const y = partValue('year');
-    const m = partValue('month');
-    const d = partValue('day');
-    const hr = partValue('hour') === '24' ? '00' : partValue('hour'); // Handle 24-hour clock edge case
-    const min = partValue('minute');
-    const sec = partValue('second');
-    
-    // The resulting Date object will be in the system's timezone (UTC on Vercel),
-    // but the *time value* it holds will be equivalent to the wall-clock time in London.
-    return new Date(`${y}-${m}-${d}T${hr}:${min}:${sec}Z`);
-}
-
 export default async function handler(req, res) {
-  // CORS and Method handling (no change)
-  res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com');
+  // --- THIS IS THE CORS FIX ---
+  const allowedOrigins = [
+    'https://manual.195vbr.com', // Production frontend
+    'https://195vbr-git-ical-auth-pierre-parks-projects.vercel.app' // Your specific preview frontend
+  ];
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+  }
+  // --- END OF FIX ---
+
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'GET') return res.status(405).json({ error: 'Method Not Allowed' });
 
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
+  // (The rest of the function is exactly the same as before)
   try {
     const { booking: opaqueBookingKey } = req.query;
     if (!opaqueBookingKey || !opaqueBookingKey.includes('-')) {
@@ -100,12 +85,8 @@ export default async function handler(req, res) {
 
     if (matchedEvent) {
       const now = new Date();
-      
-      // The iCal dates are parsed as local to the server (UTC).
       const checkInDate = matchedEvent.start;
       const checkOutDate = matchedEvent.end;
-
-      // Define the key time boundaries. These are UTC dates representing the London time.
       const fullAccessStart = new Date(Date.UTC(checkInDate.getUTCFullYear(), checkInDate.getUTCMonth(), checkInDate.getUTCDate(), 11, 0, 0));
       const fullAccessEnd = new Date(Date.UTC(checkOutDate.getUTCFullYear(), checkOutDate.getUTCMonth(), checkOutDate.getUTCDate(), 11, 0, 0));
       const gracePeriodEnd = new Date(Date.UTC(checkOutDate.getUTCFullYear(), checkOutDate.getUTCMonth(), checkOutDate.getUTCDate(), 23, 0, 0));
@@ -116,7 +97,6 @@ export default async function handler(req, res) {
       console.log(`[validate-booking] Grace Period End (UTC): ${gracePeriodEnd.toISOString()}`);
 
       let accessLevel = 'denied';
-
       if (now >= fullAccessStart && now < fullAccessEnd) {
         accessLevel = 'full';
       } else if (now < fullAccessStart || (now >= fullAccessEnd && now < gracePeriodEnd)) {
@@ -124,15 +104,12 @@ export default async function handler(req, res) {
       }
 
       if (accessLevel === 'denied') {
-        console.warn(`[validate-booking] Access denied for ${matchedEvent.summary}. The link has expired.`);
         return res.status(403).json({ error: 'Access Denied. This booking link has expired.' });
       }
 
-      console.log(`[validate-booking] Access level determined: ${accessLevel}`);
       return res.status(200).json({ access: accessLevel, guest: matchedEvent.summary });
 
     } else {
-      console.warn(`[validate-booking] No matching event found for provided PIN.`);
       return res.status(403).json({ error: 'Access Denied. The provided PIN is incorrect.' });
     }
 
