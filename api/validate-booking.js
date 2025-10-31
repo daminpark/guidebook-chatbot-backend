@@ -2,7 +2,7 @@ import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import ical from 'node-ical';
 
-// (Helper functions getPinFromPhoneNumber and getFallbackPinFromName are unchanged)
+// (Helper functions are unchanged)
 function getPinFromPhoneNumber(description) {
   if (!description) return null;
   const phoneMatch = description.match(/Phone:\s*([+\d\s()-]+)/);
@@ -11,7 +11,6 @@ function getPinFromPhoneNumber(description) {
   if (numericPhone.length < 4) return null;
   return numericPhone.slice(-4);
 }
-
 function getFallbackPinFromName(summary) {
     if (!summary) return null;
     const cleanedName = summary.replace(/(Airbnb|Vrbo)\s*\(.*?\)\s*-\s*/i, '').trim();
@@ -29,28 +28,19 @@ const ratelimit = new Ratelimit({
 });
 
 export default async function handler(req, res) {
-  // --- THIS IS THE CORS FIX ---
-  const allowedOrigins = [
-    'https://manual.195vbr.com', // Production frontend
-    'https://195vbr-git-ical-auth-pierre-parks-projects.vercel.app' // Your specific preview frontend
-  ];
-  const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-  }
-  // --- END OF FIX ---
-
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // --- ALL CORS HEADERS HAVE BEEN REMOVED ---
+  // Vercel.json now handles this for the entire project.
 
   if (req.method === 'OPTIONS') {
+    // Even with vercel.json, it's good practice to handle OPTIONS pre-emptively.
     return res.status(200).end();
   }
+
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method Not Allowed' });
   }
 
-  // (The rest of the function is exactly the same as before)
+  // (The rest of the logic is exactly the same)
   try {
     const { booking: opaqueBookingKey } = req.query;
     if (!opaqueBookingKey || !opaqueBookingKey.includes('-')) {
@@ -77,7 +67,6 @@ export default async function handler(req, res) {
         const fallbackPin = getFallbackPinFromName(event.summary);
         if (pinProvided === primaryPin || pinProvided === fallbackPin) {
           matchedEvent = event;
-          console.log(`[validate-booking] SUCCESS: PIN match for event: ${event.summary}`);
           break;
         }
       }
@@ -91,11 +80,6 @@ export default async function handler(req, res) {
       const fullAccessEnd = new Date(Date.UTC(checkOutDate.getUTCFullYear(), checkOutDate.getUTCMonth(), checkOutDate.getUTCDate(), 11, 0, 0));
       const gracePeriodEnd = new Date(Date.UTC(checkOutDate.getUTCFullYear(), checkOutDate.getUTCMonth(), checkOutDate.getUTCDate(), 23, 0, 0));
 
-      console.log(`[validate-booking] Current Time (UTC): ${now.toISOString()}`);
-      console.log(`[validate-booking] Full Access Start (UTC): ${fullAccessStart.toISOString()}`);
-      console.log(`[validate-booking] Full Access End (UTC): ${fullAccessEnd.toISOString()}`);
-      console.log(`[validate-booking] Grace Period End (UTC): ${gracePeriodEnd.toISOString()}`);
-
       let accessLevel = 'denied';
       if (now >= fullAccessStart && now < fullAccessEnd) {
         accessLevel = 'full';
@@ -108,7 +92,6 @@ export default async function handler(req, res) {
       }
 
       return res.status(200).json({ access: accessLevel, guest: matchedEvent.summary });
-
     } else {
       return res.status(403).json({ error: 'Access Denied. The provided PIN is incorrect.' });
     }
