@@ -1,5 +1,5 @@
 // This function acts as a secure proxy to your Home Assistant instances.
-// It is now updated to handle both simple state requests and specific forecast requests.
+// It is now corrected to properly handle the nested structure of the get_forecasts service response.
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com');
@@ -10,7 +10,7 @@ export default async function handler(req, res) {
     return res.status(200).end();
   }
 
-  const { house, entity, type = 'state' } = req.query; // Default to 'state' if no type is provided
+  const { house, entity, type = 'state' } = req.query;
 
   let hassUrl = '';
   let hassToken = '';
@@ -41,10 +41,8 @@ export default async function handler(req, res) {
     let response;
     let data;
 
-    // *** THIS IS THE NEW LOGIC ***
-    // We check the 'type' to decide which Home Assistant API to call.
     if (type === 'hourly_forecast' || type === 'daily_forecast') {
-      const forecastType = type.split('_')[0]; // 'hourly' or 'daily'
+      const forecastType = type.split('_')[0];
       response = await fetch(`${hassUrl}/api/services/weather/get_forecasts`, {
         method: 'POST',
         headers: headers,
@@ -53,20 +51,25 @@ export default async function handler(req, res) {
           type: forecastType
         }),
       });
-      data = await response.json();
-      // The forecast data is returned directly in the response for this service call
-      data = data[entity].forecast; 
+      const rawData = await response.json();
+      
+      // *** THIS IS THE FIX ***
+      // We now correctly look inside the object named after the entity to find the forecast array.
+      // e.g., we look inside rawData['weather.forecast_home'] to find the 'forecast' key.
+      data = (rawData[entity] && rawData[entity].forecast) ? rawData[entity].forecast : [];
+
     } else {
-      // For 'state' requests (occupancy sensors, current weather), use the simple GET request
       response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
       data = await response.json();
     }
 
     if (!response.ok) {
-      throw new Error(`Home Assistant API responded with status: ${response.status}`);
+      // Throw an error with the response body for better debugging
+      const errorBody = await response.text();
+      throw new Error(`Home Assistant API responded with status: ${response.status}. Body: ${errorBody}`);
     }
     
-    res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate');
+    res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600'); // Cache for 5 mins
     return res.status(200).json(data);
 
   } catch (error) {
