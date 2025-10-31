@@ -1,5 +1,4 @@
-// This is the final, corrected ha-proxy.js file.
-// It uses a two-step "trigger and fetch" method which is guaranteed to work.
+// This is the final version. It corrects the 400 Bad Request error.
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com');
@@ -41,23 +40,24 @@ export default async function handler(req, res) {
     let responseData;
 
     if (type === 'hourly_forecast' || type === 'daily_forecast') {
-      const forecastType = type.split('_')[0];
-
-      // --- STEP 1: TRIGGER the forecast generation via a POST service call ---
+      
+      // STEP 1: TRIGGER the forecast generation.
+      // THE FIX IS HERE: We have removed the 'type' parameter from the body.
       const triggerResponse = await fetch(`${hassUrl}/api/services/weather/get_forecasts`, {
         method: 'POST',
         headers: headers,
         body: JSON.stringify({
-          entity_id: entity,
-          type: forecastType,
+          entity_id: entity
         }),
       });
 
       if (!triggerResponse.ok) {
-        throw new Error(`Home Assistant service call failed with status: ${triggerResponse.status}`);
+        // We now provide a more detailed error message for debugging.
+        const errorBody = await triggerResponse.text();
+        throw new Error(`HA service call failed with status ${triggerResponse.status}: ${errorBody}`);
       }
 
-      // --- STEP 2: FETCH the entity state which now contains the forecast ---
+      // STEP 2: FETCH the entity state which now contains the forecast.
       const fetchStateResponse = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
       
       if (!fetchStateResponse.ok) {
@@ -66,11 +66,10 @@ export default async function handler(req, res) {
 
       const stateData = await fetchStateResponse.json();
 
-      // --- STEP 3: EXTRACT the forecast data from the attributes ---
+      // STEP 3: EXTRACT the forecast data.
       if (stateData && stateData.attributes && stateData.attributes.forecast) {
         responseData = stateData.attributes.forecast;
       } else {
-        // Return an empty array if the forecast attribute isn't found, preventing a crash.
         responseData = [];
       }
     } else {
