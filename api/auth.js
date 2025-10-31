@@ -17,6 +17,7 @@ const ICAL_URLS = {
     '31': process.env.ICAL_URL_31,
     '32': process.env.ICAL_URL_32,
     // Add all your other booking keys here
+    // e.g., '3a': process.env.ICAL_URL_3A,
     '195vbr': process.env.ICAL_URL_195VBR,
 };
 
@@ -36,7 +37,7 @@ function getPinFromName(summary) {
 // --- Main Serverless Function Handler ---
 module.exports = async (req, res) => {
     // STEP 1: Set CORS Headers on EVERY response. This is the permission slip.
-    // NOTE: For production, you will change this back to your production frontend URL.
+    // For testing, this must be your exact frontend preview URL.
     res.setHeader('Access-Control-Allow-Origin', 'https://195vbr-git-pwprotected195vbr-pierre-parks-projects.vercel.app');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -79,6 +80,7 @@ module.exports = async (req, res) => {
 
         const icalUrl = ICAL_URLS[bookingKey];
         if (!icalUrl) {
+            console.error(`Error: No iCal URL found for booking key "${bookingKey}". Check environment variables.`);
             return res.status(404).json({ error: 'Invalid booking key.' });
         }
 
@@ -96,23 +98,37 @@ module.exports = async (req, res) => {
                 const eventStart = new Date(event.start);
                 const eventEnd = new Date(event.end);
                 
+                // Rule 1: Controls are valid from 11:00 UTC on check-in day to 11:00 UTC on check-out day.
                 const controlsStart = new Date(eventStart.getTime());
                 controlsStart.setUTCHours(11, 0, 0, 0);
+
                 const controlsEnd = new Date(eventEnd.getTime());
                 controlsEnd.setUTCHours(11, 0, 0, 0);
+
+                // Rule 2: Info is valid until 23:00 UTC on check-out day.
                 const infoEnd = new Date(eventEnd.getTime());
                 infoEnd.setUTCHours(23, 0, 0, 0);
 
-                if (now > infoEnd) continue;
+                // Check the current time against these precise windows.
+                if (now > infoEnd) {
+                    // Booking is fully expired. Check the next event in the calendar.
+                    continue;
+                }
+
                 if (now >= controlsStart && now < controlsEnd) {
+                    // Current booking, within smart home control window.
                     return res.status(200).json({ accessLevel: 'full' });
                 }
+                
                 if (now < infoEnd) {
+                    // Booking is either in the future, or it's past the control time but before info expires.
+                    // In either case, they get partial access.
                     return res.status(200).json({ accessLevel: 'partial' });
                 }
             }
         }
 
+        // If the loop finishes without finding a valid, current booking for that password
         return res.status(401).json({ accessLevel: 'none', error: 'Invalid credentials or booking not found.' });
 
     } catch (error) {
