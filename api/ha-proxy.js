@@ -1,10 +1,10 @@
 // This is the definitive solution.
-// It uses the single-call method with the required '?return_response=true' parameter.
+// It handles the streaming JSON response from Home Assistant.
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS, POST');
-  res.setHeader('Access-control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -42,9 +42,7 @@ export default async function handler(req, res) {
     let data;
 
     if (type === 'hourly_forecast' || type === 'daily_forecast') {
-      const forecastType = type.split('_')[0]; // 'hourly' or 'daily'
-      
-      // THE FIX IS HERE: We add '?return_response=true' to the URL.
+      const forecastType = type.split('_')[0];
       const forecastUrl = `${hassUrl}/api/services/weather/get_forecasts?return_response=true`;
       
       response = await fetch(forecastUrl, {
@@ -55,21 +53,30 @@ export default async function handler(req, res) {
           type: forecastType
         }),
       });
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        throw new Error(`Home Assistant API responded with status ${response.status}: ${errorBody}`);
+      }
+
+      // --- NEW LOGIC TO HANDLE STREAMING JSON ---
+      const rawResponseText = await response.text();
+      // The response may contain multiple JSON objects separated by newlines.
+      // We split by newline, filter out any empty lines, and take the last one,
+      // which contains the final forecast data.
+      const jsonLines = rawResponseText.trim().split('\n');
+      const lastLine = jsonLines[jsonLines.length - 1];
       
-      data = await response.json();
-      
-      // And we use the original, correct parsing logic.
+      data = JSON.parse(lastLine);
+      // --- END OF NEW LOGIC ---
+
+      // Now, we can safely parse the final data object.
       data = data[entity].forecast; 
 
     } else {
       // The simple GET request for the state remains the same.
       response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
       data = await response.json();
-    }
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-      throw new Error(`Home Assistant API responded with status ${response.status}: ${errorBody}`);
     }
     
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate');
