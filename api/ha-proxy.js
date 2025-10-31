@@ -6,7 +6,6 @@ export default async function handler(req, res) {
   const getParam = (param) => req.method === 'GET' ? req.query[param] : req.body[param];
   const house = getParam('house');
 
-  // (HASS URL and Token logic is unchanged)
   let hassUrl, hassToken;
   switch (house) {
     case '193': hassUrl = process.env.HASS_193_URL; hassToken = process.env.HASS_193_TOKEN; break;
@@ -17,9 +16,7 @@ export default async function handler(req, res) {
   const headers = { 'Authorization': `Bearer ${hassToken}`, 'Content-Type': 'application/json' };
 
   try {
-    // GET requests (reading state) are public and remain unchanged for now
     if (req.method === 'GET') {
-      // (The existing GET logic for weather, etc. goes here, unchanged)
       const { entity, type = 'state' } = req.query;
       if (!entity) return res.status(400).json({ error: 'Missing entity' });
       let data;
@@ -41,31 +38,37 @@ export default async function handler(req, res) {
       return res.status(200).json(data);
     }
     
-    // POST requests (commands) are now secured
     if (req.method === 'POST') {
       const { entity, type, temperature, opaqueBookingKey } = req.body;
 
-      // --- NEW SECURITY CHECK 1: A valid booking key is now mandatory ---
       if (!opaqueBookingKey || !opaqueBookingKey.includes('-')) {
         return res.status(401).json({ error: 'Unauthorized: Missing or malformed booking key.' });
       }
       
-      const [bookingId, pinProvided] = opaqueBookingKey.split('-');
-      
-      // --- NEW SECURITY CHECK 2: Check permissions file ---
+      const [bookingId] = opaqueBookingKey.split('-');
       const userPermissions = permissions[bookingId];
       if (!userPermissions) {
         return res.status(403).json({ error: 'Forbidden: Unknown booking ID.' });
       }
 
-      // Check if the requested entity is in the user's allowed list for this type
-      const allowedEntities = userPermissions[type.split('_')[0]]; // e.g., permissions['31']['climate']
+      // --- THIS IS THE CORRECTED LOGIC ---
+      let permissionCategory = null;
+      if (type === 'set_temperature') {
+        permissionCategory = 'climate';
+      }
+      // Future service calls like 'turn_on' for a light would be added here.
+
+      if (!permissionCategory) {
+        return res.status(400).json({ error: 'Unsupported command type.' });
+      }
+
+      const allowedEntities = userPermissions[permissionCategory];
       if (!allowedEntities || !allowedEntities.includes(entity)) {
         console.warn(`[SECURITY] Forbidden attempt by booking ${bookingId} to control entity ${entity}`);
         return res.status(403).json({ error: 'Forbidden: You do not have permission to control this device.' });
       }
       
-      // If we pass all checks, proceed with the original logic
+      // If we pass all checks, proceed
       if (type === 'set_temperature') {
         const tempNum = parseFloat(temperature);
         if (isNaN(tempNum) || tempNum < 7 || tempNum > 25) return res.status(400).json({ error: 'Invalid temperature' });
@@ -86,6 +89,7 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error(`Error in ha-proxy for house ${house}:`, error.message);
-    return res.status(500).json({ error: 'Failed to communicate with Home Assistant' });
+    // Return a JSON error instead of raw text/html
+    return res.status(500).json({ error: 'A server error occurred while communicating with Home Assistant.' });
   }
 }
