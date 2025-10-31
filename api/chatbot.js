@@ -15,7 +15,6 @@ const ratelimit = new Ratelimit({
 
 // Main serverless function handler
 module.exports = async (req, res) => {
-    // Set CORS headers
     res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -27,7 +26,6 @@ module.exports = async (req, res) => {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
-    // Enforce rate limiting
     const ip = req.headers['x-forwarded-for'] || '127.0.0.1';
     const { success } = await ratelimit.limit(ip);
     if (!success) {
@@ -35,38 +33,54 @@ module.exports = async (req, res) => {
     }
     
     try {
-        const { prompt, context } = req.body;
-        if (!prompt || !context) {
-          return res.status(400).json({ error: 'Prompt and context are required' });
+        // The backend now expects 'history' (an array) instead of 'prompt'.
+        const { history, context } = req.body;
+        if (!context || !history || !Array.isArray(history) || history.length === 0) {
+          return res.status(400).json({ error: 'Context and a valid chat history array are required' });
         }
 
-        // Initialize Google AI
         const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+        // Using a more modern model that's great for chat
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-        // Generate content as a stream
-        const result = await model.generateContentStream(context + "\n\nUser question: " + prompt);
+        // The model's chat session is initialized with the system prompt and guidebook context.
+        const chat = model.startChat({
+            history: [
+                {
+                    role: "user",
+                    parts: [{ text: context }],
+                },
+                {
+                    role: "model",
+                    parts: [{ text: "Yes, I am ready to help. I will use the provided context to answer questions about the guesthouse and my general knowledge for anything else." }],
+                },
+                // The rest of the conversation history is added here.
+                ...history.slice(0, -1).map(msg => ({
+                    role: msg.role,
+                    parts: [{ text: msg.content }]
+                }))
+            ],
+        });
+        
+        // We only need to send the very last message from the user.
+        const lastMessage = history[history.length - 1].content;
+        const result = await chat.sendMessageStream(lastMessage);
 
-        // Set headers for streaming response
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
 
-        // Pipe the stream from the AI to the client
         for await (const chunk of result.stream) {
             const chunkText = chunk.text();
             res.write(chunkText);
         }
 
-        // End the response stream
         res.end();
 
     } catch (error) {
         console.error("Error in Vercel function:", error);
-        // Note: Can't send a JSON error if headers are already sent for streaming.
-        // The client-side will handle this as a failed request.
         if (!res.headersSent) {
             res.status(500).json({ error: 'Failed to get a response from the AI' });
         } else {
-            res.end(); // Gracefully end the stream on error
+            res.end();
         }
     }
 };
