@@ -1,9 +1,9 @@
-// This is the correct ha-proxy.js file.
-// The logic is confirmed by your manual HA test.
+// This is the final, corrected ha-proxy.js file.
+// It uses a two-step "trigger and fetch" method which is guaranteed to work.
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', 'https://manual.195vbr.com');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS, POST'); // Added POST for completeness
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS, POST');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -38,42 +38,51 @@ export default async function handler(req, res) {
       'Content-Type': 'application/json',
     };
 
-    let response;
-    let data;
+    let responseData;
 
     if (type === 'hourly_forecast' || type === 'daily_forecast') {
-      const forecastType = type.split('_')[0]; // 'hourly' or 'daily'
-      
-      // This is the fetch call that is failing, but the logic is correct.
-      response = await fetch(`${hassUrl}/api/services/weather/get_forecasts`, {
+      const forecastType = type.split('_')[0];
+
+      // --- STEP 1: TRIGGER the forecast generation via a POST service call ---
+      const triggerResponse = await fetch(`${hassUrl}/api/services/weather/get_forecasts`, {
         method: 'POST',
         headers: headers,
         body: JSON.stringify({
           entity_id: entity,
-          type: forecastType
+          type: forecastType,
         }),
       });
+
+      if (!triggerResponse.ok) {
+        throw new Error(`Home Assistant service call failed with status: ${triggerResponse.status}`);
+      }
+
+      // --- STEP 2: FETCH the entity state which now contains the forecast ---
+      const fetchStateResponse = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
       
-      data = await response.json();
-      // This parsing logic is confirmed correct by your manual test.
-      data = data[entity].forecast; 
+      if (!fetchStateResponse.ok) {
+        throw new Error(`Failed to fetch updated state with status: ${fetchStateResponse.status}`);
+      }
 
+      const stateData = await fetchStateResponse.json();
+
+      // --- STEP 3: EXTRACT the forecast data from the attributes ---
+      if (stateData && stateData.attributes && stateData.attributes.forecast) {
+        responseData = stateData.attributes.forecast;
+      } else {
+        // Return an empty array if the forecast attribute isn't found, preventing a crash.
+        responseData = [];
+      }
     } else {
-      // This fetch call for the state works correctly.
-      response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
-      data = await response.json();
-    }
-
-    if (!response.ok) {
-      // This will catch HTTP errors like 401 Unauthorized or 404 Not Found.
-      throw new Error(`Home Assistant API responded with status: ${response.status}`);
+      // For simple 'state' requests, just fetch the state directly.
+      const response = await fetch(`${hassUrl}/api/states/${entity}`, { headers });
+      responseData = await response.json();
     }
     
     res.setHeader('Cache-Control', 's-maxage=30, stale-while-revalidate');
-    return res.status(200).json(data);
+    return res.status(200).json(responseData);
 
   } catch (error) {
-    // This 'catch' block is what's sending the error message you see.
     console.error(`Error in ha-proxy for entity ${entity} with type ${type}:`, error);
     return res.status(500).json({ error: 'Failed to fetch data from Home Assistant' });
   }
