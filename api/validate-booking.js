@@ -21,11 +21,11 @@ function getFallbackPinFromName(summary) {
     return cleanedName.replace(/\s+/g, '').toLowerCase().slice(0, 6);
 }
 
-// --- NEW: Helper function to clean the guest name for display ---
-function cleanGuestName(summary) {
-    if (!summary) return "Valued Guest";
-    // Removes booking platform prefixes like "Airbnb (H1234ABCD) - "
-    return summary.replace(/(Airbnb|Vrbo)\s*\(.*?\)\s*-\s*/i, '').trim();
+function getGuestNames(summary) {
+    if (!summary) return { fullName: "Valued Guest", firstName: "Guest" };
+    const fullName = summary.replace(/(Airbnb|Vrbo)\s*\(.*?\)\s*-\s*/i, '').trim();
+    const firstName = fullName.split(' ')[0];
+    return { fullName, firstName };
 }
 
 // --- Main Handler ---
@@ -103,18 +103,17 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'Access Denied. This booking link has expired.' });
       }
 
-      // --- NEW: Prepare personalized data for the response ---
-      const guestName = cleanGuestName(matchedEvent.summary);
+      const { fullName, firstName } = getGuestNames(matchedEvent.summary);
       const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: LONDON_TIME_ZONE };
-      const checkInDateFormatted = checkInDate.toLocaleDateString('en-GB', dateOptions);
-      const checkOutDateFormatted = checkOutDate.toLocaleDateString('en-GB', dateOptions);
-
-      // --- MODIFIED: Return the new, richer data object ---
+      
       return res.status(200).json({
           access: accessLevel,
-          guestName: guestName,
-          checkInDate: checkInDateFormatted,
-          checkOutDate: checkOutDateFormatted
+          guestName: fullName,
+          guestFirstName: firstName,
+          checkInDateFormatted: checkInDate.toLocaleDateString('en-GB', dateOptions),
+          checkOutDateFormatted: checkOutDate.toLocaleDateString('en-GB', dateOptions),
+          checkInDateISO: checkInDate.toISOString(),
+          checkOutDateISO: checkOutDate.toISOString()
       });
 
     } else {
