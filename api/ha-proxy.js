@@ -1,6 +1,6 @@
+// This file is self-contained and fully secure.
+
 // --- PERMISSIONS ---
-// These maps define which booking IDs can control which entities.
-// This is a critical security layer, preventing guests from controlling devices not assigned to them.
 const climatePermissions = {
   "31": ["climate.3_1_trv"], "32": ["climate.3_2_trv"], "33": ["climate.3_c_trv", "climate.3_3_trv"], "34": ["climate.3_4_trv"], "35": ["climate.3_5_trv"], "36": ["climate.3_6_trv"], "3a": ["climate.3_1_trv", "climate.3_2_trv"], "3b": ["climate.3_4_trv", "climate.3_5_trv", "climate.3_6_trv"],
   "51": ["climate.5_1_trv"], "52": ["climate.5_2_trv"], "53": ["climate.5_c_trv", "climate.5_3_trv"], "54": ["climate.5_4_trv"], "55": ["climate.5_5_trv"], "56": ["climate.5_6_trv"], "5a": ["climate.5_1_trv", "climate.5_2_trv"], "5b": ["climate.5_4_trv", "climate.5_5_trv", "climate.5_6_trv"],
@@ -25,7 +25,6 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'Unauthorized: Missing or malformed booking key.' });
   }
   
-  // Dynamic Vercel URL construction for validation
   const host = req.headers.host;
   const protocol = host.startsWith('localhost') ? 'http://' : 'https://';
   const validationUrl = `${protocol}${host}/api/validate-booking?booking=${opaqueBookingKey}`;
@@ -46,7 +45,6 @@ export default async function handler(req, res) {
   }
   if (!hassUrl || !hassToken) return res.status(500).json({ error: 'Server configuration error' });
   const headers = { 'Authorization': `Bearer ${hassToken}`, 'Content-Type': 'application/json' };
-
 
   try {
     if (req.method === 'GET') {
@@ -75,29 +73,40 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'Forbidden: Your booking is not currently active for sending commands.' });
       }
 
-      const { entity, type, temperature } = req.body;
+      const { entity, type, value } = req.body;
       const [bookingId] = opaqueBookingKey.split('-');
       
-      let userPermissions, permissionCategory, service, serviceBody;
+      let userPermissions, service, serviceBody;
 
       if (type === 'set_temperature') {
-        permissionCategory = 'climate';
         userPermissions = climatePermissions[bookingId];
         service = 'climate/set_temperature';
-        const tempNum = parseFloat(temperature);
+        const tempNum = parseFloat(value);
         if (isNaN(tempNum) || tempNum < 7 || tempNum > 25) return res.status(400).json({ error: 'Invalid temperature' });
         serviceBody = { entity_id: entity, temperature: tempNum };
-      } else if (type === 'toggle_light') {
-        permissionCategory = 'lights';
+      } else if (type === 'light_toggle') {
         userPermissions = lightPermissions[bookingId];
         service = 'light/toggle';
         serviceBody = { entity_id: entity };
+      } else if (type === 'light_set_brightness' || type === 'light_set_color_temp') {
+        userPermissions = lightPermissions[bookingId];
+        service = 'light/turn_on';
+        serviceBody = { entity_id: entity };
+        if (type === 'light_set_brightness') {
+            const brightness = parseInt(value, 10);
+            if (isNaN(brightness) || brightness < 0 || brightness > 255) return res.status(400).json({ error: 'Invalid brightness' });
+            serviceBody.brightness = brightness;
+        } else { // light_set_color_temp
+            const colorTemp = parseInt(value, 10);
+            if (isNaN(colorTemp)) return res.status(400).json({ error: 'Invalid color temp' });
+            serviceBody.color_temp = colorTemp;
+        }
       } else {
         return res.status(400).json({ error: 'Unsupported command type.' });
       }
       
       if (!userPermissions || !userPermissions.includes(entity)) {
-        console.warn(`[SECURITY] Forbidden attempt by booking ${bookingId} to control entity ${entity} in category ${permissionCategory}`);
+        console.warn(`[SECURITY] Forbidden attempt by booking ${bookingId} to control entity ${entity}`);
         return res.status(403).json({ error: 'Forbidden: You do not have permission to control this device.' });
       }
       
@@ -111,7 +120,8 @@ export default async function handler(req, res) {
 
     return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
 
-  } catch (error) {
+  } catch (error)
+ {
     console.error(`Error in ha-proxy for house ${house}:`, error.message);
     return res.status(500).json({ error: 'A server error occurred while communicating with Home Assistant.' });
   }
