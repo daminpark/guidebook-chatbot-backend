@@ -1,35 +1,31 @@
+// --- Find and REPLACE the entire contents of validate-booking.js ---
+
 import { Ratelimit } from '@upstash/ratelimit';
 import { Redis } from '@upstash/redis';
 import ical from 'node-ical';
 
-// --- Helper Functions for PIN Generation ---
-
-/**
- * Extracts the last 8 digits from a phone number string using a specific, non-greedy regex.
- * @param {string} description - The full DESCRIPTION field from the iCal event.
- * @returns {string|null} The 8-digit PIN or null if not found.
- */
+// --- Helper Functions ---
 function getPinFromPhoneNumber(description) {
   if (!description) return null;
   const phoneMatch = description.match(/Phone:\s*([+\d\s()-]+)/);
   if (!phoneMatch || !phoneMatch[1]) return null;
-  
   const numericPhone = phoneMatch[1].replace(/\D/g, '');
-  if (numericPhone.length < 8) return null; // Check for at least 8 digits
-  
-  return numericPhone.slice(-8); // Take the last 8
+  if (numericPhone.length < 8) return null;
+  return numericPhone.slice(-8);
 }
 
-/**
- * Derives a fallback PIN from the guest's name.
- * @param {string} summary - The SUMMARY field from the iCal event.
- * @returns {string|null} The fallback PIN or null if no name is present.
- */
 function getFallbackPinFromName(summary) {
     if (!summary) return null;
     const cleanedName = summary.replace(/(Airbnb|Vrbo)\s*\(.*?\)\s*-\s*/i, '').trim();
     if (!cleanedName) return null;
     return cleanedName.replace(/\s+/g, '').toLowerCase().slice(0, 6);
+}
+
+// --- NEW: Helper function to clean the guest name for display ---
+function cleanGuestName(summary) {
+    if (!summary) return "Valued Guest";
+    // Removes booking platform prefixes like "Airbnb (H1234ABCD) - "
+    return summary.replace(/(Airbnb|Vrbo)\s*\(.*?\)\s*-\s*/i, '').trim();
 }
 
 // --- Main Handler ---
@@ -40,21 +36,15 @@ const redis = new Redis({
 
 const ratelimit = new Ratelimit({
   redis: redis,
-  limiter: Ratelimit.slidingWindow(60, "60 s"), // Generous limit for whole-home bookings
+  limiter: Ratelimit.slidingWindow(60, "60 s"),
 });
 
 const LONDON_TIME_ZONE = 'Europe/London';
 
 export default async function handler(req, res) {
-  // CORS is handled by vercel.json
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method Not Allowed' });
-  }
+  if (req.method === 'OPTIONS') { return res.status(200).end(); }
+  if (req.method !== 'GET') { return res.status(405).json({ error: 'Method Not Allowed' }); }
 
-  // --- Rate Limiting is now ACTIVE ---
   const ip = req.headers['x-forwarded-for'] || '127.0.0.1';
   const { success } = await ratelimit.limit(ip);
   if (!success) {
@@ -113,7 +103,19 @@ export default async function handler(req, res) {
         return res.status(403).json({ error: 'Access Denied. This booking link has expired.' });
       }
 
-      return res.status(200).json({ access: accessLevel, guest: matchedEvent.summary });
+      // --- NEW: Prepare personalized data for the response ---
+      const guestName = cleanGuestName(matchedEvent.summary);
+      const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: LONDON_TIME_ZONE };
+      const checkInDateFormatted = checkInDate.toLocaleDateString('en-GB', dateOptions);
+      const checkOutDateFormatted = checkOutDate.toLocaleDateString('en-GB', dateOptions);
+
+      // --- MODIFIED: Return the new, richer data object ---
+      return res.status(200).json({
+          access: accessLevel,
+          guestName: guestName,
+          checkInDate: checkInDateFormatted,
+          checkOutDate: checkOutDateFormatted
+      });
 
     } else {
       return res.status(403).json({ error: 'Access Denied. The provided PIN is incorrect.' });
