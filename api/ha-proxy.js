@@ -1,23 +1,17 @@
-// This file is self-contained and fully secure.
-const permissions = {
-  "31": { "climate": ["climate.3_1_trv"] },
-  "32": { "climate": ["climate.3_2_trv"] },
-  "33": { "climate": ["climate.3_c_trv", "climate.3_3_trv"] },
-  "34": { "climate": ["climate.3_4_trv"] },
-  "35": { "climate": ["climate.3_5_trv"] },
-  "36": { "climate": ["climate.3_6_trv"] },
-  "3a": { "climate": ["climate.3_1_trv", "climate.3_2_trv"] },
-  "3b": { "climate": ["climate.3_4_trv", "climate.3_5_trv", "climate.3_6_trv"] },
-  "51": { "climate": ["climate.5_1_trv"] },
-  "52": { "climate": ["climate.5_2_trv"] },
-  "53": { "climate": ["climate.5_c_trv", "climate.5_3_trv"] },
-  "54": { "climate": ["climate.5_4_trv"] },
-  "55": { "climate": ["climate.5_5_trv"] },
-  "56": { "climate": ["climate.5_6_trv"] },
-  "5a": { "climate": ["climate.5_1_trv", "climate.5_2_trv"] },
-  "5b": { "climate": ["climate.5_4_trv", "climate.5_5_trv", "climate.5_6_trv"] },
-  "193vbr": { "climate": ["climate.3_1_trv", "climate.3_2_trv", "climate.3_3_trv", "climate.3_c_trv", "climate.3_4_trv", "climate.3_5_trv", "climate.3_6_trv"] },
-  "195vbr": { "climate": ["climate.5_1_trv", "climate.5_2_trv", "climate.5_3_trv", "climate.5_c_trv", "climate.5_4_trv", "climate.5_5_trv", "climate.5_6_trv"] }
+// --- PERMISSIONS ---
+// These maps define which booking IDs can control which entities.
+// This is a critical security layer, preventing guests from controlling devices not assigned to them.
+const climatePermissions = {
+  "31": ["climate.3_1_trv"], "32": ["climate.3_2_trv"], "33": ["climate.3_c_trv", "climate.3_3_trv"], "34": ["climate.3_4_trv"], "35": ["climate.3_5_trv"], "36": ["climate.3_6_trv"], "3a": ["climate.3_1_trv", "climate.3_2_trv"], "3b": ["climate.3_4_trv", "climate.3_5_trv", "climate.3_6_trv"],
+  "51": ["climate.5_1_trv"], "52": ["climate.5_2_trv"], "53": ["climate.5_c_trv", "climate.5_3_trv"], "54": ["climate.5_4_trv"], "55": ["climate.5_5_trv"], "56": ["climate.5_6_trv"], "5a": ["climate.5_1_trv", "climate.5_2_trv"], "5b": ["climate.5_4_trv", "climate.5_5_trv", "climate.5_6_trv"],
+  "193vbr": ["climate.3_1_trv", "climate.3_2_trv", "climate.3_3_trv", "climate.3_c_trv", "climate.3_4_trv", "climate.3_5_trv", "climate.3_6_trv"],
+  "195vbr": ["climate.5_1_trv", "climate.5_2_trv", "climate.5_3_trv", "climate.5_c_trv", "climate.5_4_trv", "climate.5_5_trv", "climate.5_6_trv"]
+};
+const lightPermissions = {
+    "31": ["light.3_1_lights"], "32": ["light.3_2_lights"], "33": ["light.3_3_lights", "light.3_3_lamp", "light.3_c_lights"], "34": ["light.3_4_lights", "light.3_4_lamp"], "35": ["light.3_5_lights"], "36": ["light.3_6_lights"], "3a": ["light.3_1_lights", "light.3_2_lights"], "3b": ["light.3_4_lights", "light.3_4_lamp", "light.3_5_lights", "light.3_6_lights"],
+    "51": ["light.5_1_lights"], "52": ["light.5_2_lights"], "53": ["light.5_3_lights", "light.5_3_lamp", "light.5_c_lights"], "54": ["light.5_4_lights", "light.5_4_lamp"], "55": ["light.5_5_lights"], "56": ["light.5_6_lights"], "5a": ["light.5_1_lights", "light.5_2_lights"], "5b": ["light.5_4_lights", "light.5_4_lamp", "light.5_5_lights", "light.5_6_lights"],
+    "193vbr": ["light.3_1_lights", "light.3_2_lights", "light.3_3_lights", "light.3_3_lamp", "light.3_c_lights", "light.3_4_lights", "light.3_4_lamp", "light.3_5_lights", "light.3_6_lights"],
+    "195vbr": ["light.5_1_lights", "light.5_2_lights", "light.5_3_lights", "light.5_3_lamp", "light.5_c_lights", "light.5_4_lights", "light.5_4_lamp", "light.5_5_lights", "light.5_6_lights"]
 };
 
 export default async function handler(req, res) {
@@ -25,13 +19,17 @@ export default async function handler(req, res) {
 
   const getParam = (param) => req.method === 'GET' ? req.query[param] : req.body[param];
   const house = getParam('house');
-  const opaqueBookingKey = req.method === 'GET' ? req.query.opaqueBookingKey : req.body.opaqueBookingKey;
+  const opaqueBookingKey = getParam('opaqueBookingKey');
 
   if (!opaqueBookingKey || !opaqueBookingKey.includes('-')) {
     return res.status(401).json({ error: 'Unauthorized: Missing or malformed booking key.' });
   }
+  
+  // Dynamic Vercel URL construction for validation
+  const host = req.headers.host;
+  const protocol = host.startsWith('localhost') ? 'http://' : 'https://';
+  const validationUrl = `${protocol}${host}/api/validate-booking?booking=${opaqueBookingKey}`;
 
-  const validationUrl = `${process.env.VERCEL_URL.startsWith('localhost') ? 'http://' : 'https://'}${process.env.VERCEL_URL}/api/validate-booking?booking=${opaqueBookingKey}`;
   const validationResponse = await fetch(validationUrl);
   const validationData = await validationResponse.json();
 
@@ -48,6 +46,7 @@ export default async function handler(req, res) {
   }
   if (!hassUrl || !hassToken) return res.status(500).json({ error: 'Server configuration error' });
   const headers = { 'Authorization': `Bearer ${hassToken}`, 'Content-Type': 'application/json' };
+
 
   try {
     if (req.method === 'GET') {
@@ -78,33 +77,36 @@ export default async function handler(req, res) {
 
       const { entity, type, temperature } = req.body;
       const [bookingId] = opaqueBookingKey.split('-');
-      const userPermissions = permissions[bookingId];
-      if (!userPermissions) return res.status(403).json({ error: 'Forbidden: Unknown booking ID.' });
+      
+      let userPermissions, permissionCategory, service, serviceBody;
 
-      let permissionCategory = null;
-      if (type === 'set_temperature') { permissionCategory = 'climate'; }
-      if (!permissionCategory) return res.status(400).json({ error: 'Unsupported command type.' });
-
-      const allowedEntities = userPermissions[permissionCategory];
-      if (!allowedEntities || !allowedEntities.includes(entity)) {
-        console.warn(`[SECURITY] Forbidden attempt by booking ${bookingId} to control entity ${entity}`);
+      if (type === 'set_temperature') {
+        permissionCategory = 'climate';
+        userPermissions = climatePermissions[bookingId];
+        service = 'climate/set_temperature';
+        const tempNum = parseFloat(temperature);
+        if (isNaN(tempNum) || tempNum < 7 || tempNum > 25) return res.status(400).json({ error: 'Invalid temperature' });
+        serviceBody = { entity_id: entity, temperature: tempNum };
+      } else if (type === 'toggle_light') {
+        permissionCategory = 'lights';
+        userPermissions = lightPermissions[bookingId];
+        service = 'light/toggle';
+        serviceBody = { entity_id: entity };
+      } else {
+        return res.status(400).json({ error: 'Unsupported command type.' });
+      }
+      
+      if (!userPermissions || !userPermissions.includes(entity)) {
+        console.warn(`[SECURITY] Forbidden attempt by booking ${bookingId} to control entity ${entity} in category ${permissionCategory}`);
         return res.status(403).json({ error: 'Forbidden: You do not have permission to control this device.' });
       }
       
-      if (type === 'set_temperature') {
-        const tempNum = parseFloat(temperature);
-        if (isNaN(tempNum) || tempNum < 7 || tempNum > 25) return res.status(400).json({ error: 'Invalid temperature' });
-        
-        const serviceUrl = `${hassUrl}/api/services/climate/set_temperature`;
-        const serviceBody = { entity_id: entity, temperature: tempNum };
-        const response = await fetch(serviceUrl, { method: 'POST', headers, body: JSON.stringify(serviceBody) });
+      const serviceUrl = `${hassUrl}/api/services/${service}`;
+      const response = await fetch(serviceUrl, { method: 'POST', headers, body: JSON.stringify(serviceBody) });
 
-        if (!response.ok) throw new Error(`HA service call failed`);
-        const responseData = await response.json();
-        return res.status(200).json({ success: true, state: responseData });
-      }
-
-      return res.status(400).json({ error: 'Unsupported POST type' });
+      if (!response.ok) throw new Error(`HA service call failed with status ${response.status}`);
+      const responseData = await response.json();
+      return res.status(200).json({ success: true, state: responseData });
     }
 
     return res.status(405).json({ error: `Method ${req.method} Not Allowed` });
